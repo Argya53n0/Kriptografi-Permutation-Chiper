@@ -621,6 +621,35 @@ body {
   font-family: "JetBrains Mono", monospace;
   color: var(--green);
   word-break: break-all;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.btn-clear-file {
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+  font-size: 0.72rem;
+  font-family: "Inter", sans-serif;
+  cursor: pointer;
+  color: var(--text-2);
+  transition: var(--tr);
+}
+
+.btn-clear-file:hover {
+  background: var(--red-light);
+  color: var(--red);
+  border-color: var(--red);
+}
+
+.field-success {
+  font-size: 0.75rem;
+  color: var(--green);
+  margin-top: 5px;
+  min-height: 14px;
 }
 
 /* Buttons */

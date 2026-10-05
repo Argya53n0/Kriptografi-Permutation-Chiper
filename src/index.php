@@ -152,6 +152,8 @@
                         </div>
                         <input type="file" name="inputFile" id="fileInput" style="display:none" onchange="onFileSelect(this)">
                         <div class="field-hint" id="fileHint">Untuk dekripsi, upload file <code>.dat</code> hasil enkripsi dari program ini.</div>
+                        <div class="field-err" id="fileErr"></div>
+                        <div class="field-success" id="fileSuccess" style="display:none;"></div>
                     </div>
                 </div>
             </section>
@@ -186,6 +188,10 @@ function onModeChange() {
     document.getElementById('keyHint').innerHTML = enc
         ? 'Kunci digunakan untuk menentukan urutan kolom permutasi. Hanya huruf alfabet.'
         : '<strong>Gunakan kunci yang sama</strong> dengan saat melakukan enkripsi. Kunci yang salah akan menghasilkan output yang tidak bermakna.';
+    const fileErr = document.getElementById('fileErr');
+    const fileSuccess = document.getElementById('fileSuccess');
+    if (fileErr) fileErr.textContent = '';
+    if (fileSuccess) fileSuccess.style.display = 'none';
     updateFormatUI();
 }
 
@@ -254,17 +260,51 @@ function switchTab(type) {
     document.getElementById('secText').classList.toggle('hidden', type !== 'text');
     document.getElementById('secFile').classList.toggle('hidden', type !== 'file');
     document.getElementById('inputText').required = (type === 'text');
+    const fileErr = document.getElementById('fileErr');
+    const fileSuccess = document.getElementById('fileSuccess');
+    if (fileErr) fileErr.textContent = '';
+    if (fileSuccess) fileSuccess.style.display = 'none';
+}
+
+function escapeHtml(str) {
+    return str.replace(/[&<>"']/g, function(m) {
+        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[m];
+    });
+}
+
+function clearSelectedFile(e) {
+    if (e) e.stopPropagation();
+    const input = document.getElementById('fileInput');
+    input.value = '';
+    const sel = document.getElementById('fileSelected');
+    sel.innerHTML = '';
+    sel.style.display = 'none';
+    document.getElementById('fileArea').classList.remove('has-file');
+    const fileErr = document.getElementById('fileErr');
+    const fileSuccess = document.getElementById('fileSuccess');
+    if (fileErr) fileErr.textContent = '';
+    if (fileSuccess) fileSuccess.style.display = 'none';
 }
 
 function onFileSelect(input) {
-    if (!input.files[0]) return;
+    const fileErr = document.getElementById('fileErr');
+    const fileSuccess = document.getElementById('fileSuccess');
+    if (fileErr) fileErr.textContent = '';
+    if (fileSuccess) fileSuccess.style.display = 'none';
+
+    if (!input.files || !input.files[0]) return;
     const f = input.files[0];
     const sz = f.size > 1048576 ? (f.size/1048576).toFixed(1)+' MB' : (f.size/1024).toFixed(1)+' KB';
     const sel = document.getElementById('fileSelected');
-    sel.textContent = f.name + ' (' + sz + ')';
-    sel.style.display = 'block';
+    sel.innerHTML = `<span>${escapeHtml(f.name)} (${sz})</span> <button type="button" class="btn-clear-file" onclick="clearSelectedFile(event)" title="Hapus file">&times; Ganti</button>`;
+    sel.style.display = 'inline-flex';
     document.getElementById('fileArea').classList.add('has-file');
 }
+
+const fileInputEl = document.getElementById('fileInput');
+fileInputEl.addEventListener('click', function() {
+    this.value = null; // Izinkan memilih file yang sama berulang kali tanpa trigger bug
+});
 
 document.getElementById('inputText').addEventListener('input', function() {
     document.getElementById('charCount').textContent = this.value.length + ' karakter';
@@ -279,21 +319,110 @@ fa.addEventListener('drop', e => {
     onFileSelect(document.getElementById('fileInput'));
 });
 
-document.getElementById('mainForm').addEventListener('submit', function(e) {
+document.getElementById('mainForm').addEventListener('submit', async function(e) {
     const key = document.getElementById('keyInput').value.trim();
+    const keyErr = document.getElementById('keyErr');
+    const fileErr = document.getElementById('fileErr');
+    const fileSuccess = document.getElementById('fileSuccess');
+
+    keyErr.textContent = '';
+    if (fileErr) fileErr.textContent = '';
+    if (fileSuccess) fileSuccess.style.display = 'none';
+
     if (key.length < 2) {
         e.preventDefault();
-        document.getElementById('keyErr').textContent = 'Kunci minimal 2 huruf.';
+        keyErr.textContent = 'Kunci minimal 2 huruf.';
         document.getElementById('keyInput').focus();
         return;
     }
-    if (document.getElementById('inputTypeVal').value === 'text' && !validateFormat()) {
-        e.preventDefault();
-        document.getElementById('inputText').focus();
+
+    const inputType = document.getElementById('inputTypeVal').value;
+
+    if (inputType === 'text') {
+        if (!validateFormat()) {
+            e.preventDefault();
+            document.getElementById('inputText').focus();
+            return;
+        }
+        document.getElementById('submitBtn').disabled = true;
+        document.getElementById('btnText').textContent = 'Memproses...';
+        return; // Lanjut form submit reguler untuk halaman hasil teks
+    }
+
+    // Jika inputType === 'file', gunakan Fetch agar halaman tidak freeze/stuck
+    e.preventDefault();
+
+    const fileInput = document.getElementById('fileInput');
+    if (!fileInput.files || fileInput.files.length === 0) {
+        fileErr.textContent = 'Silakan pilih file terlebih dahulu.';
         return;
     }
-    document.getElementById('submitBtn').disabled = true;
-    document.getElementById('btnText').textContent = 'Memproses...';
+
+    const submitBtn = document.getElementById('submitBtn');
+    const btnText = document.getElementById('btnText');
+
+    submitBtn.disabled = true;
+    btnText.textContent = 'Memproses...';
+
+    const formData = new FormData(this);
+    formData.append('ajax', '1');
+
+    try {
+        const response = await fetch('process.php', {
+            method: 'POST',
+            body: formData,
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest'
+            }
+        });
+
+        if (!response.ok) {
+            let errMsg = 'Terjadi kesalahan saat memproses file.';
+            try {
+                const data = await response.json();
+                if (data.error) errMsg = data.error;
+            } catch (_) {
+                errMsg = 'Gagal memproses file. Pastikan format file dan kunci sudah benar.';
+            }
+            fileErr.textContent = errMsg;
+        } else {
+            // Berhasil download file
+            const disposition = response.headers.get('Content-Disposition') || '';
+            let filename = currentMode === 'encrypt' ? 'encrypted_file.dat' : 'decrypted_file';
+            const matches = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/.exec(disposition);
+            if (matches != null && matches[1]) {
+                filename = matches[1].replace(/['"]/g, '').trim();
+            }
+
+            const blob = await response.blob();
+            const downloadUrl = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = downloadUrl;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            window.URL.revokeObjectURL(downloadUrl);
+
+            fileSuccess.textContent = 'Berhasil! File "' + filename + '" telah diunduh.';
+            fileSuccess.style.display = 'block';
+        }
+    } catch (err) {
+        fileErr.textContent = 'Koneksi error saat memproses file: ' + err.message;
+    } finally {
+        submitBtn.disabled = false;
+        btnText.textContent = currentMode === 'encrypt' ? 'Enkripsi' : 'Dekripsi';
+    }
+});
+
+// Reset status tombol jika halaman dipulihkan dari browser cache
+window.addEventListener('pageshow', function() {
+    const submitBtn = document.getElementById('submitBtn');
+    const btnText = document.getElementById('btnText');
+    if (submitBtn && btnText) {
+        submitBtn.disabled = false;
+        btnText.textContent = currentMode === 'encrypt' ? 'Enkripsi' : 'Dekripsi';
+    }
 });
 </script>
 </body>
