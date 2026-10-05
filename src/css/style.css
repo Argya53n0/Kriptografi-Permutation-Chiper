@@ -616,11 +616,84 @@ body {
 
 .file-selected {
   display: none;
-  margin-top: 10px;
-  font-size: 0.8rem;
-  font-family: "JetBrains Mono", monospace;
+  margin-top: 14px;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: #ffffff;
+  border: 1px solid #86efac;
+  border-radius: 999px;
+  padding: 6px 14px;
+  box-shadow: 0 1px 3px rgba(22, 163, 74, 0.1);
+}
+
+.file-chip-icon {
   color: var(--green);
-  word-break: break-all;
+  flex-shrink: 0;
+}
+
+.file-chip-name {
+  font-size: 0.82rem;
+  font-family: "JetBrains Mono", monospace;
+  font-weight: 500;
+  color: var(--text-1);
+  max-width: 18rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-chip-size {
+  font-size: 0.72rem;
+  font-family: "JetBrains Mono", monospace;
+  color: var(--text-2);
+  background: var(--bg);
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+}
+
+.btn-clear-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #ffffff;
+  border: 1px solid #f87171;
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 0.78rem;
+  font-family: "Inter", sans-serif;
+  font-weight: 600;
+  cursor: pointer;
+  color: #dc2626;
+  box-shadow: 0 1px 3px rgba(220, 38, 38, 0.1);
+  transition: all var(--tr);
+}
+
+.btn-clear-file:hover {
+  background: #dc2626;
+  color: #ffffff;
+  border-color: #dc2626;
+  box-shadow: 0 3px 8px rgba(220, 38, 38, 0.25);
+  transform: translateY(-1px);
+}
+
+.btn-clear-file:active {
+  transform: translateY(0);
+}
+
+.field-success {
+  font-size: 0.75rem;
+  color: var(--green);
+  margin-top: 5px;
+  min-height: 14px;
 }
 
 /* Buttons */

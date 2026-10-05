@@ -62,6 +62,7 @@ if (!$errors && $inputType === 'file') {
             $dlName = 'encrypted_' . pathinfo($originalName, PATHINFO_FILENAME) . '.dat';
             header('Content-Type: application/octet-stream');
             header('Content-Disposition: attachment; filename="' . $dlName . '"');
+            header('Access-Control-Expose-Headers: Content-Disposition');
             header('Content-Length: ' . strlen($out));
             echo $out;
             exit;
@@ -74,11 +75,23 @@ if (!$errors && $inputType === 'file') {
                 $dlName = 'decrypted_' . $result['originalName'];
                 header('Content-Type: application/octet-stream');
                 header('Content-Disposition: attachment; filename="' . $dlName . '"');
+                header('Access-Control-Expose-Headers: Content-Disposition');
                 header('Content-Length: ' . strlen($result['data']));
                 echo $result['data'];
                 exit;
             }
         }
+    }
+}
+
+// ── Respon JSON untuk AJAX request pada File jika ada error ────────
+if ($errors && $inputType === 'file') {
+    $isAjax = (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest') || isset($_POST['ajax']);
+    if ($isAjax) {
+        http_response_code(400);
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode(['error' => implode("\n", $errors)]);
+        exit;
     }
 }
 
