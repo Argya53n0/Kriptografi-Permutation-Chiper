@@ -1,0 +1,11 @@
+version: '3.8'
+services:
+  web:
+    build: .
+    ports:
+      - "8081:80"
+    volumes:
+      - ./src:/var/www/html
+    environment:
+      - PHP_UPLOAD_MAX_FILESIZE=50M
+      - PHP_POST_MAX_SIZE=50M
