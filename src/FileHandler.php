@@ -1,32 +1,48 @@
 <?php
 class FileHandler {
-    // Membaca isi file, mengenkripsi, dan menyematkan ekstensi asli
-    public static function encryptFile($tmpPath, $originalName, $key, $cipher) {
+
+    /**
+     * Membaca isi file, mengenkripsi byte-per-byte, dan menyematkan ekstensi asli.
+     * Format output: "<ext>||<encrypted_data>"
+     */
+    public static function encryptFile(string $tmpPath, string $originalName, string $key, Permutation $cipher): string {
         $data = file_get_contents($tmpPath);
-        $ext = pathinfo($originalName, PATHINFO_EXTENSION);
-        
-        // Enkripsi seluruh byte file
+        $ext  = strtolower(pathinfo($originalName, PATHINFO_EXTENSION));
+
         $encryptedData = $cipher->encrypt($data, $key);
-        
-        // Simpan ekstensi asli di depan data terenkripsi dipisah dengan delimiter '||'
-        return $ext . "||" . $encryptedData;
+
+        // Simpan ekstensi asli di depan data, dipisah delimiter
+        return $ext . '||' . $encryptedData;
     }
 
-    // Mendekripsi file dan mengambil ekstensi asli yang disematkan
-    public static function decryptFile($tmpPath, $key, $cipher) {
+    /**
+     * Mendekripsi file hasil enkripsi dan mengambil ekstensi asli.
+     * Mengembalikan ['ext' => string, 'data' => string] atau null jika format tidak valid.
+     *
+     * @return array{ext: string, data: string}|null
+     */
+    public static function decryptFile(string $tmpPath, string $key, Permutation $cipher): ?array {
         $fileContent = file_get_contents($tmpPath);
-        
-        // Pisahkan ekstensi asli dan data terenkripsi
-        $parts = explode("||", $fileContent, 2);
-        
-        if (count($parts) < 2) {
-            die("Format file tidak valid atau bukan dari program ini.");
+
+        // Pisahkan ekstensi dan data terenkripsi
+        $delimPos = strpos($fileContent, '||');
+        if ($delimPos === false || $delimPos === 0) {
+            return null; // Format tidak valid
         }
-        
-        $ext = $parts[0];
-        $encryptedData = $parts[1];
-        
+
+        $ext           = substr($fileContent, 0, $delimPos);
+        $encryptedData = substr($fileContent, $delimPos + 2);
+
+        // Validasi ekstensi: hanya huruf dan angka
+        if (!preg_match('/^[a-zA-Z0-9]{1,10}$/', $ext)) {
+            return null;
+        }
+
         $decryptedData = $cipher->decrypt($encryptedData, $key);
-        return ['ext' => $ext, 'data' => $decryptedData];
+
+        return [
+            'ext'  => $ext,
+            'data' => $decryptedData,
+        ];
     }
 }
