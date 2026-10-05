@@ -3,58 +3,79 @@ require 'Permutation.php';
 require 'FileHandler.php';
 
 $cipher = new Permutation();
-$errors = [];
 
-// ── Helper: validasi kunci ──────────────────────────────────────────
-function validateKey(string $key): ?string {
-    if (empty($key))          return 'Kunci tidak boleh kosong.';
-    if (!ctype_alpha($key))   return 'Kunci hanya boleh berisi huruf alfabet.';
-    if (strlen($key) < 2)     return 'Kunci minimal 2 huruf.';
-    return null;
-}
-
+// ── Redirect jika bukan POST ────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     header('Location: index.php');
     exit;
 }
 
-$action    = $_POST['action']    ?? 'encrypt';
-$inputType = $_POST['inputType'] ?? 'text';
-$key       = strtoupper(trim($_POST['key'] ?? ''));
+$action      = $_POST['action']      ?? 'encrypt';
+$inputType   = $_POST['inputType']   ?? 'text';
+$inputFormat = $_POST['inputFormat'] ?? 'text'; // text | binary | hex
+$key         = strtoupper(trim($_POST['key'] ?? ''));
 
-// ── Validasi kunci ──────────────────────────────────────────────────
-$keyError = validateKey($key);
-if ($keyError) {
-    // Redirect balik dengan pesan error (simpan di session jika perlu, atau tampilkan langsung)
-    $errors[] = $keyError;
+// ── Helper: konversi format input ke raw bytes ──────────────────────
+function parseInput(string $raw, string $format): ?string {
+    $clean = preg_replace('/\s+/', '', $raw);
+    if ($format === 'binary') {
+        if (!preg_match('/^[01]+$/', $clean) || strlen($clean) % 8 !== 0) return null;
+        $bytes = '';
+        foreach (str_split($clean, 8) as $byte) {
+            $bytes .= chr(bindec($byte));
+        }
+        return $bytes;
+    }
+    if ($format === 'hex') {
+        if (!preg_match('/^[0-9a-fA-F]+$/', $clean) || strlen($clean) % 2 !== 0) return null;
+        return hex2bin($clean);
+    }
+    return $raw; // format 'text' — kembalikan apa adanya
 }
 
-// ── PROSES FILE ─────────────────────────────────────────────────────
+// ── Helper: konversi bytes ke representasi biner ────────────────────
+function toBinaryString(string $bytes): string {
+    $bits = [];
+    for ($i = 0; $i < strlen($bytes); $i++) {
+        $bits[] = str_pad(decbin(ord($bytes[$i])), 8, '0', STR_PAD_LEFT);
+    }
+    return implode(' ', $bits);
+}
+
+// ── Validasi kunci ──────────────────────────────────────────────────
+$errors = [];
+if (empty($key))              $errors[] = 'Kunci tidak boleh kosong.';
+elseif (!ctype_alpha($key))   $errors[] = 'Kunci hanya boleh berisi huruf alfabet.';
+elseif (strlen($key) < 2)     $errors[] = 'Kunci minimal 2 huruf.';
+
+// ── PROSES FILE (sebelum output HTML) ──────────────────────────────
 if (!$errors && $inputType === 'file') {
-    if (!isset($_FILES['inputFile']) || $_FILES['inputFile']['error'] !== UPLOAD_ERR_OK) {
-        $errors[] = 'Gagal mengupload file. Pastikan file dipilih dan tidak melebihi 50MB.';
+    $uploadOk = isset($_FILES['inputFile']) && $_FILES['inputFile']['error'] === UPLOAD_ERR_OK;
+    if (!$uploadOk) {
+        $errors[] = 'Gagal mengupload file. Pastikan file dipilih dan ukurannya tidak melebihi 50 MB.';
     } else {
         $tmpPath      = $_FILES['inputFile']['tmp_name'];
         $originalName = $_FILES['inputFile']['name'];
 
         if ($action === 'encrypt') {
-            $encryptedContent = FileHandler::encryptFile($tmpPath, $originalName, $key, $cipher);
+            $out = FileHandler::encryptFile($tmpPath, $originalName, $key, $cipher);
+            $dlName = 'encrypted_' . pathinfo($originalName, PATHINFO_FILENAME) . '.dat';
             header('Content-Type: application/octet-stream');
-            header('Content-Disposition: attachment; filename="encrypted_' . pathinfo($originalName, PATHINFO_FILENAME) . '.dat"');
-            header('Content-Length: ' . strlen($encryptedContent));
-            echo $encryptedContent;
+            header('Content-Disposition: attachment; filename="' . $dlName . '"');
+            header('Content-Length: ' . strlen($out));
+            echo $out;
             exit;
         } else {
             $result = FileHandler::decryptFile($tmpPath, $key, $cipher);
             if (!$result) {
-                $errors[] = 'Format file tidak valid. Pastikan file adalah hasil enkripsi dari program ini dengan kunci yang benar.';
+                $errors[] = 'Format file tidak valid. Pastikan file merupakan hasil enkripsi dari program ini dan kunci yang digunakan benar.';
             } else {
-                $originalExt   = $result['ext'];
-                $decryptedData = $result['data'];
+                // Gunakan nama asli dari file yang didekripsi
+                $dlName = 'decrypted_' . $result['originalName'];
                 header('Content-Type: application/octet-stream');
-                header('Content-Disposition: attachment; filename="decrypted_file.' . $originalExt . '"');
-                header('Content-Length: ' . strlen($decryptedData));
-                echo $decryptedData;
+                header('Content-Disposition: attachment; filename="' . $dlName . '"');
+                header('Content-Length: ' . strlen($result['data']));
+                echo $result['data'];
                 exit;
             }
         }
@@ -62,54 +83,70 @@ if (!$errors && $inputType === 'file') {
 }
 
 // ── PROSES TEKS ─────────────────────────────────────────────────────
-$resultData = null;
+$result = null;
 
 if (!$errors && $inputType === 'text') {
-    $text = $_POST['inputText'] ?? '';
-
-    if (empty(trim($text))) {
-        $errors[] = 'Teks input tidak boleh kosong.';
+    $rawInput = $_POST['inputText'] ?? '';
+    if (trim($rawInput) === '') {
+        $errors[] = 'Input tidak boleh kosong.';
     } else {
-        if ($action === 'encrypt') {
-            $raw        = $cipher->encrypt($text, $key);
-            $resultHex  = bin2hex($raw);
-            $display    = preg_replace('/[^\x20-\x7E]/', '', $raw); // strip non-printable untuk display
-            $formatted5 = trim(chunk_split(str_replace(' ', '', $display), 5, ' '));
-            $noSpace    = str_replace(' ', '', $display);
-            $table      = $cipher->buildTable($text, $key);
+        // Konversi format input ke bytes
+        $text = parseInput($rawInput, $inputFormat);
+        if ($text === null) {
+            $errors[] = 'Format input tidak valid. Periksa kembali nilai yang dimasukkan sesuai format yang dipilih.';
+        } elseif ($action === 'encrypt') {
+            // Untuk enkripsi teks gaya klasik, kita HAPUS SPASI dari plaintext sebelum dienkripsi.
+            // Ini membuat ciphertext murni huruf tanpa spasi, sehingga hasil copy-paste "Tanpa Spasi" 100% aman dan bisa didekripsi sempurna.
+            $cleanText  = str_replace(' ', '', $text);
+            $raw        = $cipher->encrypt($cleanText, $key, true);
+            $hex        = bin2hex($raw);
+            $binary     = toBinaryString($raw);
+            
+            // Ciphertext murni
+            $noSpace    = $raw; 
+            $grouped    = trim(chunk_split($noSpace, 5, ' '));
+            $table      = $cipher->buildTable($cleanText, $key, $inputFormat);
             $colNums    = $cipher->getColumnNumbers($key);
-            $keyUpper   = strtoupper($key);
 
-            $resultData = [
-                'type'       => 'encrypt',
-                'key'        => $keyUpper,
-                'colNums'    => $colNums,
-                'table'      => $table,
-                'noSpace'    => $noSpace,
-                'formatted5' => $formatted5,
-                'hex'        => $resultHex,
-                'inputText'  => $text,
+            $result = [
+                'mode'        => 'encrypt',
+                'key'         => $key,
+                'inputFormat' => $inputFormat,
+                'colNums'     => $colNums,
+                'table'       => $table,
+                'noSpace'     => $noSpace,
+                'grouped'     => $grouped,
+                'hex'         => $hex,
+                'binary'      => $binary,
+                'input'       => $text,
             ];
         } else {
-            // Dekripsi: terima input hex atau raw teks
-            $hexText = trim($text);
-            $rawText = ctype_xdigit($hexText) ? hex2bin($hexText) : $text;
-            $result  = $cipher->decrypt($rawText, $key);
+            // Dekripsi: terima hex atau raw bytes
+            $rawInput  = trim($text);
+            $raw       = ctype_xdigit(str_replace(' ', '', $rawInput)) ? hex2bin(str_replace(' ', '', $rawInput)) : $rawInput;
+            
+            // Hapus spasi jika user paste "Kelompok 5 huruf"
+            if (!ctype_xdigit(str_replace(' ', '', $rawInput))) {
+                $raw = str_replace(' ', '', $raw);
+            }
+            
+            $decoded   = $cipher->decrypt($raw, $key, true);
+            $colNums   = $cipher->getColumnNumbers($key);
+            $decTable  = $cipher->buildDecryptTable($raw, $key, $decoded);
 
-            $resultData = [
-                'type'      => 'decrypt',
-                'key'       => $key,
-                'plaintext' => $result,
-                'inputHex'  => $hexText,
+            $result = [
+                'mode'     => 'decrypt',
+                'key'      => $key,
+                'colNums'  => $colNums,
+                'decTable' => $decTable,
+                'plain'    => $decoded,
             ];
         }
     }
 }
 
-// ── Siapkan variabel untuk tampilan ────────────────────────────────
 $isEncrypt = ($action === 'encrypt');
 $pageTitle = $isEncrypt ? 'Hasil Enkripsi' : 'Hasil Dekripsi';
-$pageIcon  = $isEncrypt ? '🔒' : '🔓';
 ?>
 <!DOCTYPE html>
 <html lang="id">
@@ -118,176 +155,236 @@ $pageIcon  = $isEncrypt ? '🔒' : '🔓';
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><?= htmlspecialchars($pageTitle) ?> — Permutation Cipher</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
 
-<div class="page-wrapper">
+<div class="layout">
 
-    <!-- ===== SIDEBAR ===== -->
+    <!-- SIDEBAR -->
     <aside class="sidebar">
-        <div class="sidebar-logo">
-            <span class="logo-icon">🔐</span>
-            <span class="logo-text">PermCipher</span>
+        <div class="brand">
+            <div class="brand-mark">PC</div>
+            <div>
+                <div class="brand-name">Permutation Cipher</div>
+                <div class="brand-sub">Columnar Transposition</div>
+            </div>
         </div>
-        <nav class="sidebar-nav">
-            <span class="nav-label">Navigasi</span>
-            <a href="index.php" class="nav-link">⚙️ Form Enkripsi/Dekripsi</a>
+
+        <nav class="sidenav">
+            <a href="index.php" class="sidenav-item">Kembali ke Form</a>
         </nav>
-        <div class="sidebar-info">
-            <h3>Info Proses</h3>
-            <?php if ($resultData): ?>
-            <div class="info-stat">
-                <span class="stat-label">Mode</span>
-                <span class="stat-val"><?= $isEncrypt ? 'Enkripsi' : 'Dekripsi' ?></span>
+
+        <?php if ($result): ?>
+        <div class="sidebar-section">
+            <div class="section-title">Ringkasan Proses</div>
+            <div class="info-rows">
+                <div class="info-row">
+                    <span class="ir-label">Mode</span>
+                    <span class="ir-val"><?= $isEncrypt ? 'Enkripsi' : 'Dekripsi' ?></span>
+                </div>
+                <div class="info-row">
+                    <span class="ir-label">Kunci</span>
+                    <span class="ir-val mono"><?= htmlspecialchars($key) ?></span>
+                </div>
+                <div class="info-row">
+                    <span class="ir-label">Panjang kunci</span>
+                    <span class="ir-val"><?= strlen($key) ?> kolom</span>
+                </div>
+                <?php if ($isEncrypt && $result): ?>
+                <div class="info-row">
+                    <span class="ir-label">Panjang input</span>
+                    <span class="ir-val"><?= strlen($result['input']) ?> karakter</span>
+                </div>
+                <div class="info-row">
+                    <span class="ir-label">Jumlah baris</span>
+                    <span class="ir-val"><?= count($result['table']) ?> baris</span>
+                </div>
+                <?php endif; ?>
             </div>
-            <div class="info-stat">
-                <span class="stat-label">Kunci</span>
-                <span class="stat-val mono"><?= htmlspecialchars($key) ?></span>
-            </div>
-            <div class="info-stat">
-                <span class="stat-label">Panjang Kunci</span>
-                <span class="stat-val"><?= strlen($key) ?> kolom</span>
-            </div>
-            <?php if ($isEncrypt && $resultData): ?>
-            <div class="info-stat">
-                <span class="stat-label">Panjang Input</span>
-                <span class="stat-val"><?= strlen($resultData['inputText']) ?> karakter</span>
-            </div>
-            <div class="info-stat">
-                <span class="stat-label">Jumlah Baris</span>
-                <span class="stat-val"><?= count($resultData['table']) ?> baris</span>
-            </div>
-            <?php endif; ?>
-            <?php endif; ?>
-            <div class="info-box">
-                <strong>Permutation Cipher</strong>
-                <p>Cipher transposisi kolom — posisi karakter diacak, bukan karakternya.</p>
+        </div>
+        <?php endif; ?>
+
+        <div class="sidebar-section">
+            <div class="notice">
+                <div class="notice-title">Permutation Cipher</div>
+                <p>Cipher transposisi kolom — posisi karakter diacak sesuai urutan kunci, bukan karakternya.</p>
             </div>
         </div>
     </aside>
 
-    <!-- ===== MAIN CONTENT ===== -->
-    <main class="main-content">
-        <div class="content-header">
-            <h1><?= $pageIcon ?> <?= htmlspecialchars($pageTitle) ?></h1>
-            <p>Kunci: <code class="inline-code"><?= htmlspecialchars($key) ?></code></p>
-        </div>
+    <!-- MAIN -->
+    <main class="main">
+        <header class="page-header">
+            <h1 class="page-title"><?= htmlspecialchars($pageTitle) ?></h1>
+            <p class="page-desc">Kunci: <code class="code-inline"><?= htmlspecialchars($key) ?></code></p>
+        </header>
 
         <?php if ($errors): ?>
-        <!-- ── Error ── -->
-        <div class="form-card error-card">
-            <div class="card-header">
-                <span class="card-step error-step">!</span>
-                <h2>Terjadi Kesalahan</h2>
-            </div>
-            <ul class="error-list">
+        <!-- ERROR -->
+        <section class="card">
+            <div class="card-label">Kesalahan</div>
+            <ul class="err-list">
                 <?php foreach ($errors as $e): ?>
                 <li><?= htmlspecialchars($e) ?></li>
                 <?php endforeach; ?>
             </ul>
-            <a href="index.php" class="back-link">← Kembali dan perbaiki</a>
-        </div>
+            <a href="index.php" class="link-back">Kembali ke form</a>
+        </section>
 
-        <?php elseif ($resultData && $isEncrypt): ?>
-        <!-- ── Hasil Enkripsi ── -->
-
-        <!-- Tabel Permutasi -->
-        <div class="form-card">
-            <div class="card-header">
-                <span class="card-step">📊</span>
-                <h2>Tabel Permutasi</h2>
-            </div>
-            <p class="card-desc">Plaintext ditulis baris per baris, lalu kolom dibaca sesuai urutan kunci.</p>
-            <div class="perm-table-wrap">
+        <?php elseif ($result && $isEncrypt): ?>
+        <!-- TABEL PERMUTASI -->
+        <section class="card">
+            <div class="card-label">Tabel Permutasi</div>
+            <p class="card-desc">Plaintext ditulis baris demi baris, kemudian dibaca per kolom sesuai urutan kunci.</p>
+            <div class="table-scroll">
                 <table class="perm-table">
                     <thead>
-                        <tr class="perm-head-key">
-                            <?php foreach (str_split($resultData['key']) as $ch): ?>
-                            <th class="perm-th"><?= htmlspecialchars($ch) ?></th>
+                        <tr class="row-key">
+                            <?php foreach (str_split($result['key']) as $ch): ?>
+                            <th><?= htmlspecialchars($ch) ?></th>
                             <?php endforeach; ?>
                         </tr>
-                        <tr class="perm-head-num">
-                            <?php foreach ($resultData['colNums'] as $n): ?>
-                            <th class="perm-th-num"><?= $n ?></th>
+                        <tr class="row-num">
+                            <?php foreach ($result['colNums'] as $n): ?>
+                            <th><?= $n ?></th>
                             <?php endforeach; ?>
                         </tr>
                     </thead>
                     <tbody>
-                        <?php foreach ($resultData['table'] as $row): ?>
+                        <?php foreach ($result['table'] as $row): ?>
                         <tr>
                             <?php foreach ($row as $cell): ?>
-                            <td class="perm-td <?= $cell === '*' ? 'perm-pad' : '' ?>">
-                                <?= $cell === '*' ? '<span title="Padding">*</span>' : htmlspecialchars($cell) ?>
-                            </td>
+                            <td class="<?= $cell['isPad'] ? 'pad-cell' : '' ?>"><?= htmlspecialchars($cell['value']) ?></td>
                             <?php endforeach; ?>
                         </tr>
                         <?php endforeach; ?>
                     </tbody>
                 </table>
             </div>
-            <p class="table-note">* = karakter padding (otomatis dihapus saat dekripsi)</p>
-        </div>
+            <p class="table-note"><?php
+                if ($result['inputFormat'] === 'binary') echo '(pad) = byte padding, dihapus otomatis saat dekripsi';
+                elseif ($result['inputFormat'] === 'hex') echo '** = byte padding, dihapus otomatis saat dekripsi';
+                else echo '* = karakter padding, dihapus otomatis saat dekripsi';
+            ?></p>
+        </section>
 
-        <!-- Hasil -->
-        <div class="form-card">
-            <div class="card-header">
-                <span class="card-step">✅</span>
-                <h2>Hasil Ciphertext</h2>
+        <!-- HASIL CIPHERTEXT -->
+        <section class="card">
+            <div class="card-label">Ciphertext</div>
+
+            <div class="result-field">
+                <label class="result-label">Tanpa spasi</label>
+                <div class="result-box mono"><?= htmlspecialchars($result['noSpace']) ?></div>
             </div>
 
-            <div class="result-item">
-                <label class="result-label">Tanpa Spasi</label>
-                <div class="result-box mono" id="resNoSpace"><?= htmlspecialchars($resultData['noSpace']) ?></div>
+            <div class="result-field">
+                <label class="result-label">Kelompok 5 huruf <span class="label-sub">(format standar cipher klasik)</span></label>
+                <div class="result-box mono"><?= htmlspecialchars($result['grouped']) ?></div>
             </div>
 
-            <div class="result-item">
-                <label class="result-label">Kelompok 5 Huruf <span class="label-note">(format standar cipher klasik)</span></label>
-                <div class="result-box mono" id="resFmt5"><?= htmlspecialchars($resultData['formatted5']) ?></div>
+            <div class="result-field">
+                <label class="result-label">Output Biner <span class="label-sub">(setiap byte dalam 8 bit)</span></label>
+                <textarea class="result-textarea mono" id="resBin" readonly onclick="this.select()" style="font-size:0.75rem; min-height:70px;"><?= htmlspecialchars($result['binary']) ?></textarea>
+                <div style="display:flex; gap:0.5rem; margin-top:0.5rem;">
+                    <button type="button" class="btn-copy" onclick="copyEl('resBin', this)">Salin Biner</button>
+                    <button type="button" class="btn-copy btn-download" onclick="downloadTxt('resBin', 'ciphertext_binary.txt')">Download Biner (.txt)</button>
+                </div>
             </div>
 
-            <div class="result-item">
+            <div class="result-field">
                 <label class="result-label">
-                    Hex Output
-                    <span class="label-note badge-important">⚠️ Simpan ini untuk dekripsi</span>
+                    Hex output
+                    <span class="label-warn">Simpan untuk keperluan dekripsi</span>
                 </label>
-                <textarea class="result-textarea mono" id="resHex" readonly onclick="this.select()"><?= htmlspecialchars($resultData['hex']) ?></textarea>
-                <button type="button" class="copy-btn" onclick="copyText('resHex', this)">📋 Salin Hex</button>
+                <textarea class="result-textarea mono" id="hexOut" readonly onclick="this.select()"><?= htmlspecialchars($result['hex']) ?></textarea>
+                <div style="display:flex; gap:0.5rem; margin-top:0.5rem;">
+                    <button type="button" class="btn-copy" onclick="copyEl('hexOut', this)">Salin Hex</button>
+                    <button type="button" class="btn-copy btn-download" onclick="downloadTxt('hexOut', 'ciphertext_hex.txt')">Download Hex (.txt)</button>
+                </div>
             </div>
-        </div>
+        </section>
 
-        <?php elseif ($resultData && !$isEncrypt): ?>
-        <!-- ── Hasil Dekripsi ── -->
-        <div class="form-card">
-            <div class="card-header">
-                <span class="card-step">✅</span>
-                <h2>Hasil Plaintext</h2>
+        <?php elseif ($result && !$isEncrypt): ?>
+
+        <!-- TABEL PROSES DEKRIPSI -->
+        <section class="card">
+            <div class="card-label">Tabel Proses Dekripsi</div>
+            <p class="card-desc">
+                Ciphertext dibagi ke dalam kolom sesuai urutan kunci, kemudian kolom-kolom
+                dikembalikan ke posisi semula. Membaca tabel baris per baris menghasilkan plaintext.
+            </p>
+            <div class="table-scroll">
+                <table class="perm-table">
+                    <thead>
+                        <tr class="row-key">
+                            <?php foreach (str_split($result['key']) as $ch): ?>
+                            <th><?= htmlspecialchars($ch) ?></th>
+                            <?php endforeach; ?>
+                        </tr>
+                        <tr class="row-num">
+                            <?php foreach ($result['colNums'] as $n): ?>
+                            <th><?= $n ?></th>
+                            <?php endforeach; ?>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($result['decTable'] as $row): ?>
+                        <tr>
+                            <?php foreach ($row as $cell): ?>
+                            <td class="<?= $cell['isPad'] ? 'pad-cell' : '' ?>"><?= htmlspecialchars($cell['value']) ?></td>
+                            <?php endforeach; ?>
+                        </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
             </div>
-            <div class="result-item">
-                <label class="result-label">Teks Asli</label>
-                <textarea class="result-textarea mono" id="resPlain" readonly onclick="this.select()"><?= htmlspecialchars($resultData['plaintext']) ?></textarea>
-                <button type="button" class="copy-btn" onclick="copyText('resPlain', this)">📋 Salin Teks</button>
+            <p class="table-note">* = karakter padding yang dihapus. Baca baris per baris dari kiri ke kanan untuk mendapat plaintext.</p>
+        </section>
+
+        <!-- HASIL PLAINTEXT -->
+        <section class="card">
+            <div class="card-label">Plaintext</div>
+            <div class="result-field">
+                <label class="result-label">Teks hasil dekripsi</label>
+                <textarea class="result-textarea mono" id="plainOut" readonly onclick="this.select()"><?= htmlspecialchars($result['plain']) ?></textarea>
+                <div style="display:flex; gap:0.5rem; margin-top:0.5rem;">
+                    <button type="button" class="btn-copy" onclick="copyEl('plainOut', this)">Salin Teks</button>
+                    <button type="button" class="btn-copy btn-download" onclick="downloadTxt('plainOut', 'decrypted_plaintext.txt')">Download Teks (.txt)</button>
+                </div>
             </div>
-        </div>
+        </section>
         <?php endif; ?>
 
-        <!-- Tombol Kembali -->
-        <a href="index.php" class="back-btn">← Kembali ke Form</a>
-
+        <a href="index.php" class="btn-secondary">Kembali ke Form</a>
     </main>
 </div>
 
 <script>
-function copyText(id, btn) {
+function copyEl(id, btn) {
     const el = document.getElementById(id);
-    if (el.tagName === 'TEXTAREA') { el.select(); }
-    else { navigator.clipboard.writeText(el.textContent.trim()); }
-    try { document.execCommand('copy'); } catch(e) {}
+    el.select();
+    try { document.execCommand('copy'); } catch (e) {
+        navigator.clipboard?.writeText(el.value);
+    }
     const orig = btn.textContent;
-    btn.textContent = '✅ Tersalin!';
+    btn.textContent = 'Tersalin';
     btn.classList.add('copied');
     setTimeout(() => { btn.textContent = orig; btn.classList.remove('copied'); }, 2000);
+}
+
+function downloadTxt(id, filename) {
+    const text = document.getElementById(id).value;
+    const blob = new Blob([text], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
 }
 </script>
 </body>
