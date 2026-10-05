@@ -7,12 +7,11 @@ class FileHandler {
      */
     public static function encryptFile(string $tmpPath, string $originalName, string $key, Permutation $cipher): string {
         $data = file_get_contents($tmpPath);
-        $ext  = strtolower(pathinfo($originalName, PATHINFO_EXTENSION));
 
         $encryptedData = $cipher->encrypt($data, $key);
 
-        // Simpan ekstensi asli di depan data, dipisah delimiter
-        return $ext . '||' . $encryptedData;
+        // Simpan nama file asli di depan data, dipisah delimiter
+        return $originalName . '||' . $encryptedData;
     }
 
     /**
@@ -30,19 +29,17 @@ class FileHandler {
             return null; // Format tidak valid
         }
 
-        $ext           = substr($fileContent, 0, $delimPos);
+        $originalName  = substr($fileContent, 0, $delimPos);
         $encryptedData = substr($fileContent, $delimPos + 2);
 
-        // Validasi ekstensi: hanya huruf dan angka
-        if (!preg_match('/^[a-zA-Z0-9]{1,10}$/', $ext)) {
-            return null;
-        }
+        // Bersihkan nama file dari karakter aneh untuk keamanan (opsional)
+        $originalName = preg_replace('/[^a-zA-Z0-9_\-\.]/', '_', $originalName);
 
         $decryptedData = $cipher->decrypt($encryptedData, $key);
 
         return [
-            'ext'  => $ext,
-            'data' => $decryptedData,
+            'originalName' => $originalName,
+            'data'         => $decryptedData,
         ];
     }
 }
