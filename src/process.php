@@ -95,9 +95,9 @@ if (!$errors && $inputType === 'text') {
         if ($text === null) {
             $errors[] = 'Format input tidak valid. Periksa kembali nilai yang dimasukkan sesuai format yang dipilih.';
         } elseif ($action === 'encrypt') {
-            // Untuk enkripsi teks gaya klasik, kita HAPUS SPASI dari plaintext sebelum dienkripsi.
-            // Ini membuat ciphertext murni huruf tanpa spasi, sehingga hasil copy-paste "Tanpa Spasi" 100% aman dan bisa didekripsi sempurna.
-            $cleanText  = str_replace(' ', '', $text);
+            // Untuk enkripsi teks gaya klasik, kita HAPUS SELURUH WHITESPACE (spasi, enter, tab) dari plaintext.
+            // Ini membuat ciphertext murni huruf, mencegah error karena ada 'enter' tak kasat mata di akhir teks.
+            $cleanText  = preg_replace('/\s+/', '', $text);
             $raw        = $cipher->encrypt($cleanText, $key, true);
             $hex        = bin2hex($raw);
             $binary     = toBinaryString($raw);
@@ -123,11 +123,12 @@ if (!$errors && $inputType === 'text') {
         } else {
             // Dekripsi: terima hex atau raw bytes
             $rawInput  = trim($text);
-            $raw       = ctype_xdigit(str_replace(' ', '', $rawInput)) ? hex2bin(str_replace(' ', '', $rawInput)) : $rawInput;
+            $cleanHex  = preg_replace('/\s+/', '', $rawInput);
+            $raw       = ctype_xdigit($cleanHex) ? hex2bin($cleanHex) : $rawInput;
             
-            // Hapus spasi jika user paste "Kelompok 5 huruf"
-            if (!ctype_xdigit(str_replace(' ', '', $rawInput))) {
-                $raw = str_replace(' ', '', $raw);
+            // Hapus seluruh whitespace (termasuk spasi dan enter) jika user paste format "Kelompok 5 huruf" atau ada enter terselip
+            if (!ctype_xdigit($cleanHex)) {
+                $raw = preg_replace('/\s+/', '', $raw);
             }
             
             $decoded   = $cipher->decrypt($raw, $key, true);
