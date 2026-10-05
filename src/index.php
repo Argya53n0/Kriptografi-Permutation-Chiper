@@ -151,7 +151,7 @@
                             <div class="file-selected" id="fileSelected"></div>
                         </div>
                         <input type="file" name="inputFile" id="fileInput" style="display:none" onchange="onFileSelect(this)">
-                        <div class="field-hint" id="fileHint">Untuk dekripsi, upload file <code>.dat</code> hasil enkripsi dari program ini.</div>
+                        <div class="field-hint" id="fileHint">Upload file apa saja (semua tipe, maks. 50 MB) untuk dienkripsi.</div>
                         <div class="field-err" id="fileErr"></div>
                         <div class="field-success" id="fileSuccess" style="display:none;"></div>
                     </div>
@@ -188,10 +188,18 @@ function onModeChange() {
     document.getElementById('keyHint').innerHTML = enc
         ? 'Kunci digunakan untuk menentukan urutan kolom permutasi. Hanya huruf alfabet.'
         : '<strong>Gunakan kunci yang sama</strong> dengan saat melakukan enkripsi. Kunci yang salah akan menghasilkan output yang tidak bermakna.';
-    const fileErr = document.getElementById('fileErr');
-    const fileSuccess = document.getElementById('fileSuccess');
-    if (fileErr) fileErr.textContent = '';
-    if (fileSuccess) fileSuccess.style.display = 'none';
+    
+    // Update petunjuk file sesuai mode aktif
+    const fileHint = document.getElementById('fileHint');
+    if (fileHint) {
+        fileHint.innerHTML = enc
+            ? 'Upload file apa saja (semua tipe, maks. 50 MB) untuk dienkripsi.'
+            : 'Untuk dekripsi, upload file <code>.dat</code> hasil enkripsi dari program ini.';
+    }
+
+    // Reset/remove file yang diupload saat switch mode agar tidak membingungkan pengguna
+    clearSelectedFile();
+
     updateFormatUI();
 }
 
@@ -296,8 +304,23 @@ function onFileSelect(input) {
     const f = input.files[0];
     const sz = f.size > 1048576 ? (f.size/1048576).toFixed(1)+' MB' : (f.size/1024).toFixed(1)+' KB';
     const sel = document.getElementById('fileSelected');
-    sel.innerHTML = `<span>${escapeHtml(f.name)} (${sz})</span> <button type="button" class="btn-clear-file" onclick="clearSelectedFile(event)" title="Hapus file">&times; Ganti</button>`;
-    sel.style.display = 'inline-flex';
+    sel.innerHTML = `
+        <div class="file-chip">
+            <svg class="file-chip-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                <polyline points="14 2 14 8 20 8"></polyline>
+            </svg>
+            <span class="file-chip-name" title="${escapeHtml(f.name)}">${escapeHtml(f.name)}</span>
+            <span class="file-chip-size">${sz}</span>
+        </div>
+        <button type="button" class="btn-clear-file" onclick="clearSelectedFile(event)" title="Hapus dan pilih file lain">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M18 6L6 18M6 6l12 12"></path>
+            </svg>
+            <span>Ganti File</span>
+        </button>
+    `;
+    sel.style.display = 'flex';
     document.getElementById('fileArea').classList.add('has-file');
 }
 
