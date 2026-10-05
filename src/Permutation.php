@@ -37,16 +37,16 @@ class Permutation {
     }
 
     /**
-     * Padding: Gunakan PKCS untuk file, spasi untuk teks biasa (agar aman di copy-paste).
+     * Padding: Gunakan PKCS untuk file, karakter '*' untuk teks biasa (klasik).
      */
     private function addPadding(string $data, int $blockSize, bool $isText = false): string {
         $padLength = $blockSize - (strlen($data) % $blockSize);
         if ($padLength === $blockSize) {
-            $padLength = 0; // Jika sudah kelipatan, PKCS tetap nambah 1 blok, tapi untuk teks kita biarkan saja
+            $padLength = 0;
             if (!$isText) $padLength = $blockSize;
             else return $data;
         }
-        $padChar = $isText ? ' ' : chr($padLength);
+        $padChar = $isText ? '*' : chr($padLength);
         return $data . str_repeat($padChar, $padLength);
     }
 
@@ -56,7 +56,7 @@ class Permutation {
     private function removePadding(string $data, bool $isText = false): string {
         if ($data === '') return '';
         if ($isText) {
-            return rtrim($data, ' ');
+            return rtrim($data, '*');
         }
         $padLength = ord($data[strlen($data) - 1]);
         if ($padLength < 1 || $padLength > strlen($data)) return $data;
@@ -93,7 +93,7 @@ class Permutation {
         // Mencegah error jika user memasukkan teks yang terpotong paddingnya
         if (strlen($data) % $blockSize !== 0) {
             $padLen = $blockSize - (strlen($data) % $blockSize);
-            $data .= str_repeat(' ', $padLen);
+            $data .= str_repeat('*', $padLen);
         }
 
         $result    = '';
@@ -157,7 +157,7 @@ class Permutation {
         // Cegah error jika panjang data tidak pas
         if (strlen($cipherRaw) % $blockSize !== 0) {
             $padLen = $blockSize - (strlen($cipherRaw) % $blockSize);
-            $cipherRaw .= str_repeat(' ', $padLen);
+            $cipherRaw .= str_repeat('*', $padLen);
         }
 
         $numRows   = (int) ceil(strlen($cipherRaw) / $blockSize);
